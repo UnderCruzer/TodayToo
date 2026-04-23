@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@oneuldo/types": ["../../packages/types/index.ts"],
+      "@oneuldo/types/*": ["../../packages/types/*"],
+      "@oneuldo/db": ["../../packages/db/index.ts"],
+      "@oneuldo/db/*": ["../../packages/db/*"],
+      "@oneuldo/ai": ["../../packages/ai/index.ts"],
+      "@oneuldo/ai/*": ["../../packages/ai/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

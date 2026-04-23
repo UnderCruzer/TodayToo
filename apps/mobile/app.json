@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "今日もね",
+    "slug": "oneuldo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#EEEDFE"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "app.oneuldo.mobile",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "사진을 AI와 공유하기 위해 접근합니다."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#EEEDFE"
+      },
+      "package": "app.oneuldo.mobile",
+      "permissions": ["READ_MEDIA_IMAGES", "CAMERA"]
+    },
+    "plugins": [
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        { "photosPermission": "사진을 AI와 공유하기 위해 접근합니다." }
+      ]
+    ]
+  }
+}

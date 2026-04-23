@@ -1,0 +1,39 @@
+# GCP Cloud Scheduler 설정 (gcloud CLI로 적용)
+# gcloud scheduler jobs create http <name> --schedule="..." --uri="..." --oidc-service-account-email=...
+
+jobs:
+  - name: oneuldo-daily-checkin
+    description: "매일 오전 9시 (JST) 안부 메시지 발송"
+    schedule: "0 0 * * *"          # UTC 00:00 = JST 09:00
+    timezone: UTC
+    uri: "${BASE_URL}/api/cron/daily-checkin"
+    http_method: GET
+    headers:
+      Authorization: "Bearer ${CRON_SECRET}"
+
+  - name: oneuldo-concern-check
+    description: "매일 자정 (JST/KST) 이상감지 실행"
+    schedule: "0 15 * * *"         # UTC 15:00 = JST 00:00
+    timezone: UTC
+    uri: "${BASE_URL}/api/cron/concern-check"
+    http_method: GET
+    headers:
+      Authorization: "Bearer ${CRON_SECRET}"
+
+  - name: oneuldo-weekly-question
+    description: "매주 월요일 오전 9시 (JST) 회고록 특별 질문"
+    schedule: "0 0 * * 1"
+    timezone: UTC
+    uri: "${BASE_URL}/api/cron/weekly-question"
+    http_method: GET
+    headers:
+      Authorization: "Bearer ${CRON_SECRET}"
+
+  - name: oneuldo-monthly-memoir
+    description: "매월 마지막 날 자정 (JST) 회고록 생성"
+    schedule: "0 15 28-31 * *"     # 말일 근사치 (Cloud Scheduler는 L 미지원)
+    timezone: UTC
+    uri: "${BASE_URL}/api/cron/monthly-memoir"
+    http_method: GET
+    headers:
+      Authorization: "Bearer ${CRON_SECRET}"
