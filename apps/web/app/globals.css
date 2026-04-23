@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-primary: #7F77DD;
+  }
+}
+
+@media print {
+  @page {
+    margin: 2cm;
+    size: A4;
+  }
+  body {
+    font-size: 12pt;
+    line-height: 1.8;
+  }
+}
