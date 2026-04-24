@@ -5,6 +5,7 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "outDir": "./dist",
+    "types": ["node"],
     "paths": {
       "@oneuldo/types": ["../types/index.ts"],
       "@oneuldo/types/*": ["../types/*"],

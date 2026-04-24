@@ -4,14 +4,12 @@
   "main": "./index.ts",
   "types": "./index.ts",
   "scripts": {
-    "migrate": "node migrate.js",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "pg": "^8.11.0"
+    "@supabase/supabase-js": "^2.45.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.0",
     "typescript": "^5.4.0"
   }
 }

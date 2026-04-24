@@ -1,4 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI, FunctionDeclarationSchemaType } from '@google/generative-ai';
+import type { Part } from '@google/generative-ai';
 import type { Elder } from '@oneuldo/types';
 import {
   getElderById,
@@ -13,9 +14,7 @@ import {
   sendReplyToElder,
 } from './notifications';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 const DAILY_PROMPTS = {
   ja: [
@@ -75,7 +74,6 @@ export async function runAllDailyCheckins(): Promise<void> {
   await Promise.allSettled(elders.map(runDailyCheckin));
 }
 
-// 어르신 답장 처리 (AI 응답 생성 + 도구 사용)
 export async function processElderReply(
   elderId: string,
   message: string,
@@ -85,7 +83,7 @@ export async function processElderReply(
   const context = await getElderContext(elderId);
 
   const lang = elder.language as 'ja' | 'ko';
-  const systemText =
+  const systemInstruction =
     lang === 'ja'
       ? `あなたは${elder.name}さんの毎日の友達AIです。
 温かく、ゆっくり、丁寧に話してください。
@@ -98,117 +96,109 @@ export async function processElderReply(
 최근 대화 주제: ${JSON.stringify(context.recentTopics)}
 답변은 3문장 이내로.`;
 
-  const tools: Anthropic.Tool[] = [
-    {
-      name: 'detect_concern',
-      description: '우울/고립/건강 이상 신호 감지 시 호출',
-      input_schema: {
-        type: 'object',
-        properties: {
-          level: { type: 'string', enum: ['low', 'medium', 'high'] },
-          reason: { type: 'string' },
-        },
-        required: ['level', 'reason'],
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-1.5-flash',
+    systemInstruction,
+    tools: [
+      {
+        functionDeclarations: [
+          {
+            name: 'detect_concern',
+            description: '우울/고립/건강 이상 신호 감지 시 호출',
+            parameters: {
+              type: FunctionDeclarationSchemaType.OBJECT,
+              properties: {
+                level: {
+                  type: FunctionDeclarationSchemaType.STRING,
+                  enum: ['low', 'medium', 'high'],
+                  description: '심각도 수준',
+                },
+                reason: {
+                  type: FunctionDeclarationSchemaType.STRING,
+                  description: '감지 이유',
+                },
+              },
+              required: ['level', 'reason'],
+            },
+          },
+          {
+            name: 'save_memory',
+            description: '중요한 기억이나 감정을 DB에 저장',
+            parameters: {
+              type: FunctionDeclarationSchemaType.OBJECT,
+              properties: {
+                topic: { type: FunctionDeclarationSchemaType.STRING },
+                emotion: { type: FunctionDeclarationSchemaType.STRING },
+                content: { type: FunctionDeclarationSchemaType.STRING },
+              },
+              required: ['topic', 'content'],
+            },
+          },
+        ],
       },
-    },
-    {
-      name: 'save_memory',
-      description: '중요한 기억이나 감정을 DB에 저장',
-      input_schema: {
-        type: 'object',
-        properties: {
-          topic: { type: 'string' },
-          emotion: { type: 'string' },
-          content: { type: 'string' },
-        },
-        required: ['topic', 'content'],
-      },
-    },
-  ];
+    ],
+    generationConfig: { maxOutputTokens: 500 },
+  });
 
-  const userContent: Anthropic.MessageParam['content'] = imageUrl
-    ? [
-        {
-          type: 'image',
-          source: { type: 'url', url: imageUrl },
-        },
-        { type: 'text', text: message || '(사진)' },
-      ]
-    : message;
+  const chat = model.startChat();
 
-  const messages: Anthropic.MessageParam[] = [
-    { role: 'user', content: userContent },
-  ];
+  let userParts: Part[];
+  if (imageUrl) {
+    const resp = await fetch(imageUrl);
+    const buf = await resp.arrayBuffer();
+    const base64 = Buffer.from(buf).toString('base64');
+    const mimeType = resp.headers.get('content-type') ?? 'image/jpeg';
+    userParts = [
+      { inlineData: { mimeType, data: base64 } },
+      { text: message || '(사진)' },
+    ];
+  } else {
+    userParts = [{ text: message }];
+  }
 
-  // EquiLaw 패턴 동일 — tool_use 루프
-  let lastQuestion = message;
+  let result = await chat.sendMessage(userParts);
+
   while (true) {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 500,
-      system: [
-        {
-          type: 'text',
-          text: systemText,
-          cache_control: { type: 'ephemeral' },
-        },
-      ],
-      tools,
-      messages,
-    });
+    const response = result.response;
+    const functionCalls = response.functionCalls();
 
-    if (response.stop_reason === 'end_turn') {
-      const text = response.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map(b => b.text)
-        .join('');
-
-      await sendReplyToElder(elder, text);
-
+    if (!functionCalls || functionCalls.length === 0) {
+      await sendReplyToElder(elder, response.text());
       await saveConversation({
         elderId,
         module: 'daily',
-        question: lastQuestion,
+        question: message,
         answer: message,
       });
       break;
     }
 
-    if (response.stop_reason === 'tool_use') {
-      const toolUseBlock = response.content.find(
-        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
-      );
-      if (!toolUseBlock) break;
+    const fc = functionCalls[0];
+    const toolResult = await executeTool(fc.name, fc.args as Record<string, string>, elder);
 
-      const toolResult = await executeTool(toolUseBlock, elder);
-      messages.push({ role: 'assistant', content: response.content });
-      messages.push({
-        role: 'user',
-        content: [
-          {
-            type: 'tool_result',
-            tool_use_id: toolUseBlock.id,
-            content: toolResult,
-          },
-        ],
-      });
-    }
+    result = await chat.sendMessage([
+      {
+        functionResponse: {
+          name: fc.name,
+          response: { result: toolResult },
+        },
+      },
+    ]);
   }
 }
 
 async function executeTool(
-  toolUse: Anthropic.ToolUseBlock,
+  name: string,
+  input: Record<string, string>,
   elder: Elder
 ): Promise<string> {
-  const input = toolUse.input as Record<string, string>;
-
-  if (toolUse.name === 'detect_concern') {
+  if (name === 'detect_concern') {
     const level = input.level as 'low' | 'medium' | 'high';
     await logConcern(elder.id, level, input.reason);
     return JSON.stringify({ ok: true, level });
   }
 
-  if (toolUse.name === 'save_memory') {
+  if (name === 'save_memory') {
     await saveConversation({
       elderId: elder.id,
       module: 'daily',

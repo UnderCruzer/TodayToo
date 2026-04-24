@@ -1,58 +1,98 @@
-import { query, queryOne } from './index';
+import { supabase } from './index';
 import type {
   Elder, Guardian, Conversation, ConcernLog, Memoir,
   ElderContext, ResponsePattern, MemoirChapter, Language
 } from '@oneuldo/types';
 
+// ─── Mappers (snake_case → camelCase) ────────────────────────────────────────
+
+function mapElder(r: Record<string, unknown>): Elder {
+  return {
+    id: r.id as string,
+    name: r.name as string,
+    language: r.language as string,
+    timezone: r.timezone as string,
+    lineUserId: r.line_user_id as string | undefined,
+    kakaoUserId: r.kakao_user_id as string | undefined,
+    pushToken: r.push_token as string | undefined,
+    createdAt: r.created_at as string,
+  };
+}
+
+function mapGuardian(r: Record<string, unknown>): Guardian {
+  return {
+    id: r.id as string,
+    elderId: r.elder_id as string,
+    name: r.name as string,
+    role: r.role as string,
+    email: r.email as string,
+    language: r.language as string,
+    createdAt: r.created_at as string,
+  };
+}
+
+function mapConversation(r: Record<string, unknown>): Conversation {
+  return {
+    id: r.id as string,
+    elderId: r.elder_id as string,
+    module: r.module as string,
+    question: r.question as string,
+    answer: r.answer as string | undefined,
+    photoUrls: (r.photo_urls ?? []) as string[],
+    emotionTags: (r.emotion_tags ?? []) as string[],
+    weekNumber: r.week_number as number | undefined,
+    createdAt: r.created_at as string,
+  };
+}
+
+function mapConcernLog(r: Record<string, unknown>): ConcernLog {
+  return {
+    id: r.id as string,
+    elderId: r.elder_id as string,
+    level: r.level as 'low' | 'medium' | 'high',
+    reason: r.reason as string,
+    notified: r.notified as boolean,
+    createdAt: r.created_at as string,
+  };
+}
+
+function mapMemoir(r: Record<string, unknown>): Memoir {
+  return {
+    id: r.id as string,
+    elderId: r.elder_id as string,
+    month: r.month as string,
+    chapters: r.chapters as MemoirChapter[],
+    pdfUrl: r.pdf_url as string | undefined,
+    sentAt: r.sent_at as string | undefined,
+    createdAt: r.created_at as string,
+  };
+}
+
 // ─── Elder ───────────────────────────────────────────────────────────────────
 
 export async function getElderById(id: string): Promise<Elder> {
-  const row = await queryOne<Elder>(
-    `SELECT id, name, language, timezone,
-            line_user_id AS "lineUserId",
-            kakao_user_id AS "kakaoUserId",
-            push_token AS "pushToken",
-            created_at AS "createdAt"
-     FROM elders WHERE id = $1`,
-    [id]
-  );
-  if (!row) throw new Error(`Elder not found: ${id}`);
-  return row;
+  const { data, error } = await supabase
+    .from('elders').select('*').eq('id', id).single();
+  if (error || !data) throw new Error(`Elder not found: ${id}`);
+  return mapElder(data);
 }
 
 export async function getElderByLineUserId(lineUserId: string): Promise<Elder | null> {
-  return queryOne<Elder>(
-    `SELECT id, name, language, timezone,
-            line_user_id AS "lineUserId",
-            kakao_user_id AS "kakaoUserId",
-            push_token AS "pushToken",
-            created_at AS "createdAt"
-     FROM elders WHERE line_user_id = $1`,
-    [lineUserId]
-  );
+  const { data } = await supabase
+    .from('elders').select('*').eq('line_user_id', lineUserId).maybeSingle();
+  return data ? mapElder(data) : null;
 }
 
 export async function getElderByKakaoUserId(kakaoUserId: string): Promise<Elder | null> {
-  return queryOne<Elder>(
-    `SELECT id, name, language, timezone,
-            line_user_id AS "lineUserId",
-            kakao_user_id AS "kakaoUserId",
-            push_token AS "pushToken",
-            created_at AS "createdAt"
-     FROM elders WHERE kakao_user_id = $1`,
-    [kakaoUserId]
-  );
+  const { data } = await supabase
+    .from('elders').select('*').eq('kakao_user_id', kakaoUserId).maybeSingle();
+  return data ? mapElder(data) : null;
 }
 
 export async function getAllElders(): Promise<Elder[]> {
-  return query<Elder>(
-    `SELECT id, name, language, timezone,
-            line_user_id AS "lineUserId",
-            kakao_user_id AS "kakaoUserId",
-            push_token AS "pushToken",
-            created_at AS "createdAt"
-     FROM elders ORDER BY created_at DESC`
-  );
+  const { data } = await supabase
+    .from('elders').select('*').order('created_at', { ascending: false });
+  return (data ?? []).map(mapElder);
 }
 
 export async function createElder(data: {
@@ -63,39 +103,31 @@ export async function createElder(data: {
   kakaoUserId?: string;
   pushToken?: string;
 }): Promise<Elder> {
-  const row = await queryOne<Elder>(
-    `INSERT INTO elders (name, language, timezone, line_user_id, kakao_user_id, push_token)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id, name, language, timezone,
-               line_user_id AS "lineUserId",
-               kakao_user_id AS "kakaoUserId",
-               push_token AS "pushToken",
-               created_at AS "createdAt"`,
-    [
-      data.name,
-      data.language,
-      data.timezone ?? (data.language === 'ja' ? 'Asia/Tokyo' : 'Asia/Seoul'),
-      data.lineUserId ?? null,
-      data.kakaoUserId ?? null,
-      data.pushToken ?? null,
-    ]
-  );
-  return row!;
+  const { data: row, error } = await supabase
+    .from('elders')
+    .insert({
+      name: data.name,
+      language: data.language,
+      timezone: data.timezone ?? (data.language === 'ja' ? 'Asia/Tokyo' : 'Asia/Seoul'),
+      line_user_id: data.lineUserId ?? null,
+      kakao_user_id: data.kakaoUserId ?? null,
+      push_token: data.pushToken ?? null,
+    })
+    .select('*').single();
+  if (error || !row) throw new Error('Failed to create elder');
+  return mapElder(row);
 }
 
 export async function updateElderPushToken(id: string, pushToken: string): Promise<void> {
-  await query(`UPDATE elders SET push_token = $1 WHERE id = $2`, [pushToken, id]);
+  await supabase.from('elders').update({ push_token: pushToken }).eq('id', id);
 }
 
 // ─── Guardian ─────────────────────────────────────────────────────────────────
 
 export async function getGuardians(elderId: string): Promise<Guardian[]> {
-  return query<Guardian>(
-    `SELECT id, elder_id AS "elderId", name, role, email, language,
-            created_at AS "createdAt"
-     FROM guardians WHERE elder_id = $1`,
-    [elderId]
-  );
+  const { data } = await supabase
+    .from('guardians').select('*').eq('elder_id', elderId);
+  return (data ?? []).map(mapGuardian);
 }
 
 export async function createGuardian(data: {
@@ -105,14 +137,18 @@ export async function createGuardian(data: {
   email: string;
   language: Language;
 }): Promise<Guardian> {
-  const row = await queryOne<Guardian>(
-    `INSERT INTO guardians (elder_id, name, role, email, language)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, elder_id AS "elderId", name, role, email, language,
-               created_at AS "createdAt"`,
-    [data.elderId, data.name, data.role, data.email, data.language]
-  );
-  return row!;
+  const { data: row, error } = await supabase
+    .from('guardians')
+    .insert({
+      elder_id: data.elderId,
+      name: data.name,
+      role: data.role,
+      email: data.email,
+      language: data.language,
+    })
+    .select('*').single();
+  if (error || !row) throw new Error('Failed to create guardian');
+  return mapGuardian(row);
 }
 
 // ─── Conversation ─────────────────────────────────────────────────────────────
@@ -126,63 +162,44 @@ export async function saveConversation(data: {
   emotionTags?: string[];
   weekNumber?: number;
 }): Promise<Conversation> {
-  const row = await queryOne<Conversation>(
-    `INSERT INTO conversations
-       (elder_id, module, question, answer, photo_urls, emotion_tags, week_number)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, elder_id AS "elderId", module, question, answer,
-               photo_urls AS "photoUrls",
-               emotion_tags AS "emotionTags",
-               week_number AS "weekNumber",
-               created_at AS "createdAt"`,
-    [
-      data.elderId,
-      data.module,
-      data.question,
-      data.answer ?? null,
-      JSON.stringify(data.photoUrls ?? []),
-      JSON.stringify(data.emotionTags ?? []),
-      data.weekNumber ?? null,
-    ]
-  );
-  return row!;
+  const { data: row, error } = await supabase
+    .from('conversations')
+    .insert({
+      elder_id: data.elderId,
+      module: data.module,
+      question: data.question,
+      answer: data.answer ?? null,
+      photo_urls: data.photoUrls ?? [],
+      emotion_tags: data.emotionTags ?? [],
+      week_number: data.weekNumber ?? null,
+    })
+    .select('*').single();
+  if (error || !row) throw new Error('Failed to save conversation');
+  return mapConversation(row);
 }
 
-export async function getRecentConversations(
-  elderId: string,
-  limit = 10
-): Promise<Conversation[]> {
-  return query<Conversation>(
-    `SELECT id, elder_id AS "elderId", module, question, answer,
-            photo_urls AS "photoUrls",
-            emotion_tags AS "emotionTags",
-            week_number AS "weekNumber",
-            created_at AS "createdAt"
-     FROM conversations
-     WHERE elder_id = $1
-     ORDER BY created_at DESC
-     LIMIT $2`,
-    [elderId, limit]
-  );
+export async function getRecentConversations(elderId: string, limit = 10): Promise<Conversation[]> {
+  const { data } = await supabase
+    .from('conversations').select('*')
+    .eq('elder_id', elderId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return (data ?? []).map(mapConversation);
 }
 
-export async function getMonthlyConversations(
-  elderId: string,
-  month: string  // 'YYYY-MM'
-): Promise<Conversation[]> {
-  return query<Conversation>(
-    `SELECT id, elder_id AS "elderId", module, question, answer,
-            photo_urls AS "photoUrls",
-            emotion_tags AS "emotionTags",
-            week_number AS "weekNumber",
-            created_at AS "createdAt"
-     FROM conversations
-     WHERE elder_id = $1
-       AND to_char(created_at, 'YYYY-MM') = $2
-       AND answer IS NOT NULL
-     ORDER BY created_at ASC`,
-    [elderId, month]
-  );
+export async function getMonthlyConversations(elderId: string, month: string): Promise<Conversation[]> {
+  const [year, mon] = month.split('-').map(Number);
+  const start = new Date(year, mon - 1, 1).toISOString();
+  const end = new Date(year, mon, 1).toISOString();
+
+  const { data } = await supabase
+    .from('conversations').select('*')
+    .eq('elder_id', elderId)
+    .gte('created_at', start)
+    .lt('created_at', end)
+    .not('answer', 'is', null)
+    .order('created_at', { ascending: true });
+  return (data ?? []).map(mapConversation);
 }
 
 // ─── Concern Log ──────────────────────────────────────────────────────────────
@@ -192,33 +209,29 @@ export async function logConcern(
   level: 'low' | 'medium' | 'high',
   reason: string
 ): Promise<ConcernLog> {
-  const row = await queryOne<ConcernLog>(
-    `INSERT INTO concern_logs (elder_id, level, reason)
-     VALUES ($1, $2, $3)
-     RETURNING id, elder_id AS "elderId", level, reason, notified,
-               created_at AS "createdAt"`,
-    [elderId, level, reason]
-  );
-  return row!;
+  const { data: row, error } = await supabase
+    .from('concern_logs')
+    .insert({ elder_id: elderId, level, reason })
+    .select('*').single();
+  if (error || !row) throw new Error('Failed to log concern');
+  return mapConcernLog(row);
 }
 
 export async function getRecentConcernLogs(elderId: string, days = 7): Promise<ConcernLog[]> {
-  return query<ConcernLog>(
-    `SELECT id, elder_id AS "elderId", level, reason, notified,
-            created_at AS "createdAt"
-     FROM concern_logs
-     WHERE elder_id = $1
-       AND created_at > NOW() - INTERVAL '1 day' * $2
-     ORDER BY created_at DESC`,
-    [elderId, days]
-  );
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await supabase
+    .from('concern_logs').select('*')
+    .eq('elder_id', elderId)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false });
+  return (data ?? []).map(mapConcernLog);
 }
 
 export async function markConcernNotified(id: string): Promise<void> {
-  await query(`UPDATE concern_logs SET notified = TRUE WHERE id = $1`, [id]);
+  await supabase.from('concern_logs').update({ notified: true }).eq('id', id);
 }
 
-// ─── Elder Context (for AI modules) ──────────────────────────────────────────
+// ─── Elder Context ────────────────────────────────────────────────────────────
 
 export async function getElderContext(elderId: string): Promise<ElderContext> {
   const [recentConvs, concernLogs, responseStats] = await Promise.all([
@@ -227,16 +240,14 @@ export async function getElderContext(elderId: string): Promise<ElderContext> {
     getResponsePattern(elderId),
   ]);
 
+  const negativeEmotions = ['슬픔', '외로움', '그리움', '우울', '寂しさ', '悲しみ'];
   const recentTopics = recentConvs
     .flatMap(c => (c.emotionTags as string[]) ?? [])
-    .filter(Boolean)
-    .slice(0, 5);
+    .filter(Boolean).slice(0, 5);
 
-  const negativeEmotions = ['슬픔', '외로움', '그리움', '우울', '寂しさ', '悲しみ'];
   const negativeEmotionCount = recentConvs
     .flatMap(c => (c.emotionTags as string[]) ?? [])
-    .filter(tag => negativeEmotions.some(n => tag.includes(n)))
-    .length;
+    .filter(tag => negativeEmotions.some(n => tag.includes(n))).length;
 
   return {
     recentTopics,
@@ -249,126 +260,81 @@ export async function getElderContext(elderId: string): Promise<ElderContext> {
 }
 
 export async function getResponsePattern(elderId: string): Promise<ResponsePattern> {
-  const row = await queryOne<{
-    hours_since_last: string;
-    avg_delay_minutes: string;
-    today_delay_minutes: string;
-  }>(
-    `WITH last_reply AS (
-       SELECT created_at FROM conversations
-       WHERE elder_id = $1 AND answer IS NOT NULL
-       ORDER BY created_at DESC LIMIT 1
-     ),
-     avg_delay AS (
-       SELECT AVG(
-         EXTRACT(EPOCH FROM (created_at - LAG(created_at) OVER (ORDER BY created_at))) / 60
-       ) AS avg_minutes
-       FROM conversations
-       WHERE elder_id = $1 AND answer IS NOT NULL
-     ),
-     today_last AS (
-       SELECT created_at FROM conversations
-       WHERE elder_id = $1 AND answer IS NOT NULL
-         AND created_at::date = CURRENT_DATE
-       ORDER BY created_at DESC LIMIT 1
-     )
-     SELECT
-       COALESCE(
-         EXTRACT(EPOCH FROM (NOW() - (SELECT created_at FROM last_reply))) / 3600,
-         999
-       ) AS hours_since_last,
-       COALESCE((SELECT avg_minutes FROM avg_delay), 60) AS avg_delay_minutes,
-       COALESCE(
-         EXTRACT(EPOCH FROM (NOW() - (SELECT created_at FROM today_last))) / 60,
-         9999
-       ) AS today_delay_minutes`,
-    [elderId]
-  );
+  const { data: convs } = await supabase
+    .from('conversations').select('created_at')
+    .eq('elder_id', elderId)
+    .not('answer', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(20);
 
-  return {
-    hoursSinceLastReply: parseFloat(row?.hours_since_last ?? '999'),
-    avgResponseDelay: parseFloat(row?.avg_delay_minutes ?? '60'),
-    todayResponseDelay: parseFloat(row?.today_delay_minutes ?? '9999'),
-    negativeEmotionCount: 0,
-  };
+  if (!convs || convs.length === 0) {
+    return { hoursSinceLastReply: 999, avgResponseDelay: 60, todayResponseDelay: 9999, negativeEmotionCount: 0 };
+  }
+
+  const now = Date.now();
+  const hoursSinceLastReply = (now - new Date(convs[0].created_at).getTime()) / (1000 * 60 * 60);
+
+  let totalDelay = 0;
+  for (let i = 0; i < convs.length - 1; i++) {
+    totalDelay += (new Date(convs[i].created_at).getTime() - new Date(convs[i + 1].created_at).getTime()) / (1000 * 60);
+  }
+  const avgResponseDelay = convs.length > 1 ? totalDelay / (convs.length - 1) : 60;
+
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayConv = convs.find(c => new Date(c.created_at) >= todayStart);
+  const todayResponseDelay = todayConv
+    ? (now - new Date(todayConv.created_at).getTime()) / (1000 * 60)
+    : 9999;
+
+  return { hoursSinceLastReply, avgResponseDelay, todayResponseDelay, negativeEmotionCount: 0 };
 }
 
 // ─── Memoir ───────────────────────────────────────────────────────────────────
 
-export async function saveMemoir(
-  elderId: string,
-  month: string,
-  chapters: MemoirChapter[]
-): Promise<Memoir> {
-  const row = await queryOne<Memoir>(
-    `INSERT INTO memoirs (elder_id, month, chapters)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (elder_id, month) DO UPDATE SET chapters = $3
-     RETURNING id, elder_id AS "elderId", month, chapters,
-               pdf_url AS "pdfUrl", sent_at AS "sentAt",
-               created_at AS "createdAt"`,
-    [elderId, month, JSON.stringify(chapters)]
-  );
-  return row!;
+export async function saveMemoir(elderId: string, month: string, chapters: MemoirChapter[]): Promise<Memoir> {
+  const { data: row, error } = await supabase
+    .from('memoirs')
+    .upsert({ elder_id: elderId, month, chapters }, { onConflict: 'elder_id,month' })
+    .select('*').single();
+  if (error || !row) throw new Error('Failed to save memoir');
+  return mapMemoir(row);
 }
 
 export async function getMemoirById(id: string): Promise<(Memoir & { elder: Elder }) | null> {
-  const row = await queryOne<Memoir & { elder: Elder }>(
-    `SELECT m.id, m.elder_id AS "elderId", m.month, m.chapters,
-            m.pdf_url AS "pdfUrl", m.sent_at AS "sentAt",
-            m.created_at AS "createdAt",
-            json_build_object(
-              'id', e.id,
-              'name', e.name,
-              'language', e.language,
-              'timezone', e.timezone
-            ) AS elder
-     FROM memoirs m
-     JOIN elders e ON e.id = m.elder_id
-     WHERE m.id = $1`,
-    [id]
-  );
-  return row;
+  const { data } = await supabase
+    .from('memoirs').select('*, elders(*)').eq('id', id).maybeSingle();
+  if (!data) return null;
+  return { ...mapMemoir(data), elder: mapElder(data.elders as Record<string, unknown>) };
 }
 
 export async function getMemoirsByElder(elderId: string): Promise<Memoir[]> {
-  return query<Memoir>(
-    `SELECT id, elder_id AS "elderId", month, chapters,
-            pdf_url AS "pdfUrl", sent_at AS "sentAt",
-            created_at AS "createdAt"
-     FROM memoirs WHERE elder_id = $1 ORDER BY month DESC`,
-    [elderId]
-  );
+  const { data } = await supabase
+    .from('memoirs').select('*')
+    .eq('elder_id', elderId)
+    .order('month', { ascending: false });
+  return (data ?? []).map(mapMemoir);
 }
 
 export async function markMemoirSent(id: string, pdfUrl: string): Promise<void> {
-  await query(
-    `UPDATE memoirs SET pdf_url = $1, sent_at = NOW() WHERE id = $2`,
-    [pdfUrl, id]
-  );
+  await supabase.from('memoirs')
+    .update({ pdf_url: pdfUrl, sent_at: new Date().toISOString() }).eq('id', id);
 }
 
 // ─── Invite Token ─────────────────────────────────────────────────────────────
 
 export async function createInviteToken(elderId: string): Promise<string> {
   const token = crypto.randomUUID();
-  await query(
-    `INSERT INTO invite_tokens (elder_id, token, expires_at)
-     VALUES ($1, $2, NOW() + INTERVAL '7 days')`,
-    [elderId, token]
-  );
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  await supabase.from('invite_tokens').insert({ elder_id: elderId, token, expires_at: expiresAt });
   return token;
 }
 
-export async function consumeInviteToken(
-  token: string
-): Promise<{ elderId: string } | null> {
-  const row = await queryOne<{ elder_id: string }>(
-    `UPDATE invite_tokens
-     SET used = TRUE
-     WHERE token = $1 AND used = FALSE AND expires_at > NOW()
-     RETURNING elder_id`,
-    [token]
-  );
-  return row ? { elderId: row.elder_id } : null;
+export async function consumeInviteToken(token: string): Promise<{ elderId: string } | null> {
+  const { data } = await supabase
+    .from('invite_tokens')
+    .update({ used: true })
+    .eq('token', token).eq('used', false)
+    .gt('expires_at', new Date().toISOString())
+    .select('elder_id').maybeSingle();
+  return data ? { elderId: data.elder_id as string } : null;
 }

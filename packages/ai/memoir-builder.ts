@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { Elder, MemoirChapter } from '@oneuldo/types';
 import {
   getElderById,
@@ -11,11 +11,8 @@ import {
 import { i18n } from '@oneuldo/types/i18n';
 import { sendGuardianNotification } from './notifications';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-// 매주 월요일: 회고록 특별 질문 발송
 export async function sendWeeklyMemoirQuestion(elder: Elder): Promise<string> {
   const context = await getElderContext(elder.id);
   const recentTopics = context.recentTopics;
@@ -29,23 +26,17 @@ export async function sendWeeklyMemoirQuestion(elder: Elder): Promise<string> {
          이와 연결된 소중한 기억을 끌어낼 질문 1개를 만들어주세요.
          따뜻하고 그리운 감성으로. 질문만 출력해주세요.`;
 
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 200,
-    // 시스템 프롬프트 캐싱 (반복 호출 비용 절감)
-    system: [
-      {
-        type: 'text',
-        text: elder.language === 'ja'
-          ? 'あなたは高齢者の人生の物語を引き出す専門家です。温かく、懐かしさを大切にしてください。'
-          : '당신은 어르신의 삶의 이야기를 이끌어내는 전문가입니다. 따뜻하고 그리운 감성을 소중히 여겨주세요.',
-        cache_control: { type: 'ephemeral' },
-      },
-    ],
-    messages: [{ role: 'user', content: questionPrompt }],
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-1.5-flash',
+    systemInstruction:
+      elder.language === 'ja'
+        ? 'あなたは高齢者の人生の物語を引き出す専門家です。温かく、懐かしさを大切にしてください。'
+        : '당신은 어르신의 삶의 이야기를 이끌어내는 전문가입니다. 따뜻하고 그리운 감성을 소중히 여겨주세요.',
+    generationConfig: { maxOutputTokens: 200 },
   });
 
-  const question = (response.content[0] as Anthropic.TextBlock).text;
+  const result = await model.generateContent(questionPrompt);
+  const question = result.response.text();
   const prefix =
     elder.language === 'ja'
       ? '📖 今週の特別な質問です —\n\n'
@@ -54,10 +45,9 @@ export async function sendWeeklyMemoirQuestion(elder: Elder): Promise<string> {
   return prefix + question;
 }
 
-// 매월 말: 회고록 자동 생성
 export async function buildMonthlyMemoir(
   elderId: string,
-  month: string  // 'YYYY-MM'
+  month: string
 ): Promise<{ id: string; monthSummary: string } | null> {
   const elder = await getElderById(elderId);
   const conversations = await getMonthlyConversations(elderId, month);
@@ -69,23 +59,17 @@ export async function buildMonthlyMemoir(
       ? buildJaStructurePrompt(elder.name, conversations)
       : buildKoStructurePrompt(elder.name, conversations);
 
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 3000,
-    system: [
-      {
-        type: 'text',
-        text: elder.language === 'ja'
-          ? 'あなたは高齢者の回顧録を執筆する作家です。本人の言葉を大切にし、品のある温かみのある文体で書いてください。JSONのみ出力。'
-          : '당신은 어르신의 회고록을 집필하는 작가입니다. 어르신의 말투를 살리고 따뜻한 문체로 써주세요. JSON만 출력.',
-        cache_control: { type: 'ephemeral' },
-      },
-    ],
-    messages: [{ role: 'user', content: structurePrompt }],
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-1.5-flash',
+    systemInstruction:
+      elder.language === 'ja'
+        ? 'あなたは高齢者の回顧録を執筆する作家です。本人の言葉を大切にし、品のある温かみのある文体で書いてください。JSONのみ出力。'
+        : '당신은 어르신의 회고록을 집필하는 작가입니다. 어르신의 말투를 살리고 따뜻한 문체로 써주세요. JSON만 출력.',
+    generationConfig: { maxOutputTokens: 3000 },
   });
 
-  const rawText = (response.content[0] as Anthropic.TextBlock).text;
-  // JSON 파싱 안전 처리 (마크다운 코드 블록 제거)
+  const result = await model.generateContent(structurePrompt);
+  const rawText = result.response.text();
   const jsonText = rawText.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
   const { chapters, monthSummary } = JSON.parse(jsonText) as {
     chapters: MemoirChapter[];
