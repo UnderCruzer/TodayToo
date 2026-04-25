@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, FunctionDeclarationSchemaType } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType as FunctionDeclarationSchemaType } from '@google/generative-ai';
 import type { Part } from '@google/generative-ai';
 import type { Elder } from '@oneuldo/types';
 import {
@@ -97,7 +97,7 @@ export async function processElderReply(
 답변은 3문장 이내로.`;
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.0-flash-lite',
     systemInstruction,
     tools: [
       {

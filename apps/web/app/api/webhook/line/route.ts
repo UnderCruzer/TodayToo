@@ -40,9 +40,13 @@ export async function POST(req: NextRequest) {
 
     const lineUserId = event.source.userId;
     const text = event.message.text ?? '';
+    console.log('[LINE] userId:', lineUserId, '/ message:', text);
 
     const elder = await getElderByLineUserId(lineUserId);
-    if (!elder) continue;
+    if (!elder) {
+      console.log('[LINE] 어르신 없음 — Supabase에서 line_user_id 업데이트 필요:', lineUserId);
+      continue;
+    }
 
     processElderReply(elder.id, text).catch(err =>
       console.error('[line webhook]', err)

@@ -27,7 +27,7 @@ export async function sendWeeklyMemoirQuestion(elder: Elder): Promise<string> {
          따뜻하고 그리운 감성으로. 질문만 출력해주세요.`;
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.0-flash-lite',
     systemInstruction:
       elder.language === 'ja'
         ? 'あなたは高齢者の人生の物語を引き出す専門家です。温かく、懐かしさを大切にしてください。'
@@ -60,7 +60,7 @@ export async function buildMonthlyMemoir(
       : buildKoStructurePrompt(elder.name, conversations);
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.0-flash-lite',
     systemInstruction:
       elder.language === 'ja'
         ? 'あなたは高齢者の回顧録を執筆する作家です。本人の言葉を大切にし、品のある温かみのある文体で書いてください。JSONのみ出力。'
