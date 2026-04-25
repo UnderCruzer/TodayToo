@@ -1,5 +1,4 @@
-import { GoogleGenerativeAI, SchemaType as FunctionDeclarationSchemaType } from '@google/generative-ai';
-import type { Part } from '@google/generative-ai';
+import { GoogleGenAI, Type } from '@google/genai';
 import type { Elder } from '@oneuldo/types';
 import {
   getElderById,
@@ -12,9 +11,10 @@ import {
   sendPushNotification,
   sendMessengerNotification,
   sendReplyToElder,
+  fetchLineContent,
 } from './notifications';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const DAILY_PROMPTS = {
   ja: [
@@ -77,7 +77,9 @@ export async function runAllDailyCheckins(): Promise<void> {
 export async function processElderReply(
   elderId: string,
   message: string,
-  imageUrl?: string
+  imageUrl?: string,
+  lineReplyToken?: string,
+  lineImageMessageId?: string
 ): Promise<void> {
   const elder = await getElderById(elderId);
   const context = await getElderContext(elderId);
@@ -96,108 +98,90 @@ export async function processElderReply(
 최근 대화 주제: ${JSON.stringify(context.recentTopics)}
 답변은 3문장 이내로.`;
 
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash-lite',
-    systemInstruction,
-    tools: [
-      {
-        functionDeclarations: [
-          {
-            name: 'detect_concern',
-            description: '우울/고립/건강 이상 신호 감지 시 호출',
-            parameters: {
-              type: FunctionDeclarationSchemaType.OBJECT,
-              properties: {
-                level: {
-                  type: FunctionDeclarationSchemaType.STRING,
-                  enum: ['low', 'medium', 'high'],
-                  description: '심각도 수준',
-                },
-                reason: {
-                  type: FunctionDeclarationSchemaType.STRING,
-                  description: '감지 이유',
-                },
-              },
-              required: ['level', 'reason'],
-            },
-          },
-          {
-            name: 'save_memory',
-            description: '중요한 기억이나 감정을 DB에 저장',
-            parameters: {
-              type: FunctionDeclarationSchemaType.OBJECT,
-              properties: {
-                topic: { type: FunctionDeclarationSchemaType.STRING },
-                emotion: { type: FunctionDeclarationSchemaType.STRING },
-                content: { type: FunctionDeclarationSchemaType.STRING },
-              },
-              required: ['topic', 'content'],
-            },
-          },
-        ],
+  const detectConcernDecl = {
+    name: 'detect_concern',
+    description: '우울/고립/건강 이상 신호 감지 시 호출',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        level: { type: Type.STRING, enum: ['low', 'medium', 'high'], description: '심각도 수준' },
+        reason: { type: Type.STRING, description: '감지 이유' },
       },
-    ],
-    generationConfig: { maxOutputTokens: 500 },
-  });
+      required: ['level', 'reason'],
+    },
+  };
 
-  const chat = model.startChat();
+  const saveMemoryDecl = {
+    name: 'save_memory',
+    description: '중요한 기억이나 감정을 DB에 저장',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        topic: { type: Type.STRING },
+        emotion: { type: Type.STRING },
+        content: { type: Type.STRING },
+      },
+      required: ['topic', 'content'],
+    },
+  };
 
+  const tools = [{ functionDeclarations: [detectConcernDecl, saveMemoryDecl] }];
+
+  // 이미지 처리
+  type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
   let userParts: Part[];
-  if (imageUrl) {
+  if (lineImageMessageId) {
+    const content = await fetchLineContent(lineImageMessageId);
+    userParts = content
+      ? [{ inlineData: { mimeType: content.mimeType, data: content.data } }, { text: message || '(사진)' }]
+      : [{ text: message || '(사진을 받았어요)' }];
+  } else if (imageUrl) {
     const resp = await fetch(imageUrl);
     const buf = await resp.arrayBuffer();
-    const base64 = Buffer.from(buf).toString('base64');
-    const mimeType = resp.headers.get('content-type') ?? 'image/jpeg';
     userParts = [
-      { inlineData: { mimeType, data: base64 } },
+      { inlineData: { mimeType: resp.headers.get('content-type') ?? 'image/jpeg', data: Buffer.from(buf).toString('base64') } },
       { text: message || '(사진)' },
     ];
   } else {
     userParts = [{ text: message }];
   }
 
-  let result = await chat.sendMessage(userParts);
+  console.log('[AI] Gemini 호출 시작 elderId:', elderId);
+
+  const chat = ai.chats.create({
+    model: 'gemini-2.5-flash',
+    config: { systemInstruction, maxOutputTokens: 500, tools },
+  });
+
+  let response = await chat.sendMessage({ message: userParts });
+  console.log('[AI] Gemini 응답 수신');
 
   while (true) {
-    const response = result.response;
-    const functionCalls = response.functionCalls();
+    const fnCalls = response.functionCalls;
 
-    if (!functionCalls || functionCalls.length === 0) {
-      await sendReplyToElder(elder, response.text());
-      await saveConversation({
-        elderId,
-        module: 'daily',
-        question: message,
-        answer: message,
-      });
+    if (!fnCalls || fnCalls.length === 0) {
+      const aiText = response.text ?? '';
+      console.log('[AI] 최종 답변:', aiText.slice(0, 60));
+      await sendReplyToElder(elder, aiText, lineReplyToken);
+      console.log('[AI] 전송 완료');
+      await saveConversation({ elderId, module: 'daily', question: message, answer: aiText });
       break;
     }
 
-    const fc = functionCalls[0];
-    const toolResult = await executeTool(fc.name, fc.args as Record<string, string>, elder);
+    const fc = fnCalls[0];
+    const toolResult = await executeTool(fc.name!, fc.args as Record<string, string>, elder);
 
-    result = await chat.sendMessage([
-      {
-        functionResponse: {
-          name: fc.name,
-          response: { result: toolResult },
-        },
-      },
-    ]);
+    response = await chat.sendMessage({
+      message: [{ functionResponse: { name: fc.name!, response: { result: toolResult } } }],
+    });
   }
 }
 
-async function executeTool(
-  name: string,
-  input: Record<string, string>,
-  elder: Elder
-): Promise<string> {
+async function executeTool(name: string, input: Record<string, string>, elder: Elder): Promise<string> {
   if (name === 'detect_concern') {
-    const level = input.level as 'low' | 'medium' | 'high';
-    await logConcern(elder.id, level, input.reason);
-    return JSON.stringify({ ok: true, level });
+    await logConcern(elder.id, input.level as 'low' | 'medium' | 'high', input.reason);
+    return JSON.stringify({ ok: true, level: input.level });
   }
-
   if (name === 'save_memory') {
     await saveConversation({
       elderId: elder.id,
@@ -208,6 +192,5 @@ async function executeTool(
     });
     return JSON.stringify({ ok: true });
   }
-
   return JSON.stringify({ error: 'unknown tool' });
 }

@@ -42,7 +42,44 @@ export async function sendLineMessage(
       to: lineUserId,
       messages: [{ type: 'text', text: message }],
     }),
-  }).catch(err => console.error('[LINE] Failed:', err));
+  }).catch(err => console.error('[LINE push] Failed:', err));
+}
+
+// replyToken 기반 즉시 답장 (push quota 소비 없음)
+export async function sendLineReply(
+  replyToken: string,
+  message: string
+): Promise<void> {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) return;
+
+  await fetch('https://api.line.me/v2/bot/message/reply', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      replyToken,
+      messages: [{ type: 'text', text: message }],
+    }),
+  }).catch(err => console.error('[LINE reply] Failed:', err));
+}
+
+// LINE Content API — 이미지/파일 다운로드
+export async function fetchLineContent(messageId: string): Promise<{ data: string; mimeType: string } | null> {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) return null;
+
+  const res = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(err => { console.error('[LINE content] Failed:', err); return null; });
+
+  if (!res || !res.ok) return null;
+
+  const buf = await res.arrayBuffer();
+  const mimeType = res.headers.get('content-type') ?? 'image/jpeg';
+  return { data: Buffer.from(buf).toString('base64'), mimeType };
 }
 
 // ─── 카카오 알림톡 (한국) ────────────────────────────────────────────────────
@@ -75,14 +112,17 @@ export async function sendKakaoMessage(
 
 export async function sendReplyToElder(
   elder: Elder,
-  message: string
+  message: string,
+  lineReplyToken?: string
 ): Promise<void> {
   const tasks: Promise<void>[] = [];
 
   if (elder.pushToken) {
     tasks.push(sendPushNotification(elder.pushToken, message));
   }
-  if (elder.lineUserId) {
+  if (lineReplyToken) {
+    tasks.push(sendLineReply(lineReplyToken, message));
+  } else if (elder.lineUserId) {
     tasks.push(sendLineMessage(elder.lineUserId, message));
   }
   if (elder.kakaoUserId) {
@@ -133,8 +173,13 @@ export async function sendGuardianNotification(
 
 export async function sendMessengerNotification(
   elder: Elder,
-  message: string
+  message: string,
+  lineReplyToken?: string
 ): Promise<void> {
-  if (elder.lineUserId) await sendLineMessage(elder.lineUserId, message);
+  if (lineReplyToken) {
+    await sendLineReply(lineReplyToken, message);
+  } else if (elder.lineUserId) {
+    await sendLineMessage(elder.lineUserId, message);
+  }
   if (elder.kakaoUserId) await sendKakaoMessage(elder.kakaoUserId, message);
 }
