@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   transpilePackages: ['@oneuldo/ai', '@oneuldo/db', '@oneuldo/types'],
   images: {
     remotePatterns: [

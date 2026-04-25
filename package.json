@@ -6,7 +6,8 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "db:migrate": "node packages/db/migrate.js"
+    "db:migrate": "node packages/db/migrate.js",
+    "tunnel": "node scripts/tunnel.js"
   },
   "devDependencies": {
     "turbo": "^2.0.0",

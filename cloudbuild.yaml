@@ -39,7 +39,7 @@ steps:
       - "--min-instances=1"
       - "--max-instances=10"
       - "--set-env-vars=NODE_ENV=production"
-      - "--set-secrets=DATABASE_URL=oneuldo-db-url:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,CRON_SECRET=cron-secret:latest,LINE_CHANNEL_ACCESS_TOKEN=line-token:latest,LINE_CHANNEL_SECRET=line-secret:latest"
+      - "--set-secrets=SUPABASE_URL=oneuldo-supabase-url:latest,SUPABASE_SERVICE_ROLE_KEY=oneuldo-supabase-key:latest,GEMINI_API_KEY=oneuldo-gemini-key:latest,CRON_SECRET=oneuldo-cron-secret:latest,LINE_CHANNEL_ACCESS_TOKEN=oneuldo-line-token:latest,LINE_CHANNEL_SECRET=oneuldo-line-secret:latest,RESEND_API_KEY=oneuldo-resend-key:latest"
 
 options:
   logging: CLOUD_LOGGING_ONLY
