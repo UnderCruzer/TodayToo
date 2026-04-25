@@ -1,5 +1,22 @@
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
+export async function registerElder(name: string, language: 'ja' | 'ko'): Promise<{ elderId: string; name: string }> {
+  const res = await fetch(`${BASE_URL}/api/elder/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, language }),
+  });
+  if (!res.ok) throw new Error(`Register failed: ${res.status}`);
+  return res.json() as Promise<{ elderId: string; name: string }>;
+}
+
+export async function getTodayMessage(elderId: string): Promise<string | null> {
+  const res = await fetch(`${BASE_URL}/api/elder/${elderId}/today`);
+  if (!res.ok) return null;
+  const data = await res.json() as { message: string | null };
+  return data.message;
+}
+
 export async function sendReply(
   elderId: string,
   message: string,

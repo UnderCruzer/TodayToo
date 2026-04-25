@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { sendReply } from '../lib/api';
+import { sendReply, getTodayMessage } from '../lib/api';
 import { getStoredElderId, getStoredLanguage } from '../lib/storage';
 
 const COLORS = {
@@ -51,13 +51,21 @@ export default function HomeScreen() {
       setElderId(id);
       setLanguage(lang);
 
-      // 오늘의 메시지는 실제로 push notification으로 수신
-      // 데모용 플레이스홀더
-      setTodayMessage(
-        lang === 'ja'
-          ? 'おはようございます！今日の朝ごはんは食べましたか？😊'
-          : '좋은 아침이에요! 오늘 아침은 드셨어요? 😊'
-      );
+      if (id) {
+        const msg = await getTodayMessage(id).catch(() => null);
+        setTodayMessage(
+          msg ??
+            (lang === 'ja'
+              ? 'おはようございます！今日もよろしくお願いします😊'
+              : '좋은 아침이에요! 오늘도 잘 부탁드려요 😊')
+        );
+      } else {
+        setTodayMessage(
+          lang === 'ja'
+            ? '設定からお名前を登録してください😊'
+            : '설정에서 이름을 등록해주세요 😊'
+        );
+      }
     })();
   }, []);
 
