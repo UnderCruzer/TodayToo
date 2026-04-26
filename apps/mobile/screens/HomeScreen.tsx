@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   SafeAreaView,
   View,
@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { sendReply, getTodayMessage } from '../lib/api';
 import { getStoredElderId, getStoredLanguage } from '../lib/storage';
@@ -42,32 +43,34 @@ export default function HomeScreen() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      const [id, lang] = await Promise.all([
-        getStoredElderId(),
-        getStoredLanguage(),
-      ]);
-      setElderId(id);
-      setLanguage(lang);
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        const [id, lang] = await Promise.all([
+          getStoredElderId(),
+          getStoredLanguage(),
+        ]);
+        setElderId(id);
+        setLanguage(lang);
 
-      if (id) {
-        const msg = await getTodayMessage(id).catch(() => null);
-        setTodayMessage(
-          msg ??
-            (lang === 'ja'
-              ? 'おはようございます！今日もよろしくお願いします😊'
-              : '좋은 아침이에요! 오늘도 잘 부탁드려요 😊')
-        );
-      } else {
-        setTodayMessage(
-          lang === 'ja'
-            ? '設定からお名前を登録してください😊'
-            : '설정에서 이름을 등록해주세요 😊'
-        );
-      }
-    })();
-  }, []);
+        if (id) {
+          const msg = await getTodayMessage(id).catch(() => null);
+          setTodayMessage(
+            msg ??
+              (lang === 'ja'
+                ? 'おはようございます！今日もよろしくお願いします😊'
+                : '좋은 아침이에요! 오늘도 잘 부탁드려요 😊')
+          );
+        } else {
+          setTodayMessage(
+            lang === 'ja'
+              ? '設定からお名前を登録してください😊'
+              : '설정에서 이름을 등록해주세요 😊'
+          );
+        }
+      })();
+    }, [])
+  );
 
   async function pickImage() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
