@@ -57,7 +57,7 @@ async function handleMessageEvent(event: LineEvent) {
   console.log('[LINE] ▶ 처리 시작 elderId:', elder.id, '/ text:', text);
 
   // AI 처리는 백그라운드 — 웹훅은 즉시 200 리턴
-  processElderReply(elder.id, text, undefined, undefined, imageMessageId)
+  processElderReply(elder.id, text, undefined, event.replyToken, imageMessageId)
     .then(() => console.log('[LINE] ✓ AI 답장 완료 elderId:', elder.id))
     .catch(err => console.error('[LINE] ✗ processElderReply 실패:', err));
 }

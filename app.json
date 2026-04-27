@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "5413fa68-816c-4e20-8f02-cb168a32a1ea"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.undercruzer.oneuldo",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
+}

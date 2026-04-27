@@ -13,7 +13,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "app.oneuldo.mobile",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "사진을 AI와 공유하기 위해 접근합니다."
+        "NSPhotoLibraryUsageDescription": "사진을 AI와 공유하기 위해 접근합니다.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -21,14 +22,26 @@
         "backgroundColor": "#EEEDFE"
       },
       "package": "app.oneuldo.mobile",
-      "permissions": ["READ_MEDIA_IMAGES", "CAMERA"]
+      "permissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
+      "expo-dev-client",
       "expo-notifications",
       [
         "expo-image-picker",
-        { "photosPermission": "사진을 AI와 공유하기 위해 접근합니다." }
+        {
+          "photosPermission": "사진을 AI와 공유하기 위해 접근합니다."
+        }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "5413fa68-816c-4e20-8f02-cb168a32a1ea"
+      }
+    }
   }
 }
