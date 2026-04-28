@@ -1,308 +1,323 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:record/record.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
+import '../main.dart';
 
-enum _VoiceState { idle, recording, thinking, speaking }
+class _Msg {
+  final bool isAi;
+  final String text;
+  _Msg({required this.isAi, required this.text});
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
-
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen> {
   String? _elderId;
   String _language = 'ja';
-  String _aiMessage = '';
-  _VoiceState _voiceState = _VoiceState.idle;
-
+  final List<_Msg> _messages = [];
+  bool _thinking = false;
   final _tts = FlutterTts();
-  final _recorder = AudioRecorder();
+  final _textController = TextEditingController();
+  final _scrollController = ScrollController();
+  bool _greeted = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _initTts();
     _loadAndGreet();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _tts.stop();
-    _recorder.dispose();
+    _textController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   Future<void> _initTts() async {
-    await _tts.setSharedInstance(true);
-    _tts.setCompletionHandler(
-      () { if (mounted) setState(() => _voiceState = _VoiceState.idle); },
-    );
-    _tts.setErrorHandler(
-      (_) { if (mounted) setState(() => _voiceState = _VoiceState.idle); },
-    );
+    _tts.setCompletionHandler(() {});
+    _tts.setErrorHandler((_) {});
   }
 
   Future<void> _loadAndGreet() async {
+    if (_greeted) return;
     final id = await StorageService.getElderId();
     final lang = await StorageService.getLanguage();
+    if (!mounted) return;
+    setState(() { _elderId = id; _language = lang; _greeted = true; });
 
-    setState(() {
-      _elderId = id;
-      _language = lang;
-    });
-
+    String greeting;
     if (id == null) {
-      setState(() => _aiMessage = lang == 'ja'
-          ? '設定からお名前を登録してください😊'
-          : '설정에서 이름을 등록해주세요 😊');
-      return;
+      greeting = lang == 'ja'
+          ? '⚙️ 設定からお名前を登録してください'
+          : '⚙️ 설정에서 이름을 먼저 등록해주세요';
+    } else {
+      final msg = await ApiService.getTodayMessage(id).catchError((_) => null);
+      greeting = msg ?? (lang == 'ja' ? 'おはようございます！今日もよろしくお願いします😊' : '좋은 아침이에요! 오늘도 잘 부탁드려요 😊');
     }
-
-    final msg = await ApiService.getTodayMessage(id).catchError((_) => null);
-    final greeting = msg ??
-        (lang == 'ja'
-            ? 'おはようございます！今日もよろしくお願いします😊'
-            : '좋은 아침이에요! 오늘도 잘 부탁드려요 😊');
-
-    setState(() => _aiMessage = greeting);
-    _speak(greeting);
+    if (mounted) {
+      setState(() => _messages.add(_Msg(isAi: true, text: greeting)));
+      _speak(greeting);
+    }
   }
 
   Future<void> _speak(String text) async {
     await _tts.stop();
-    setState(() => _voiceState = _VoiceState.speaking);
     await _tts.setLanguage(_language == 'ja' ? 'ja-JP' : 'ko-KR');
     await _tts.setSpeechRate(0.85);
     await _tts.speak(text);
   }
 
-  Future<void> _startRecording() async {
+  Future<void> _sendText() async {
+    final text = _textController.text.trim();
+    if (text.isEmpty || _thinking) return;
     if (_elderId == null) {
-      _alert(_language == 'ja' ? '設定が必要です' : '설정이 필요합니다',
-          _language == 'ja' ? '設定画面でIDを入力してください' : '설정 화면에서 이름을 먼저 등록해주세요');
+      setState(() => _messages.add(_Msg(isAi: true,
+          text: _language == 'ja' ? '先に設定で名前を登録してください' : '먼저 설정에서 이름을 등록해주세요')));
       return;
     }
-
-    final mic = await Permission.microphone.request();
-    if (!mic.isGranted) {
-      _alert(_language == 'ja' ? 'マイクの許可が必要です' : '마이크 권한이 필요해요', '');
-      return;
-    }
-
-    await _tts.stop();
-    final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-
-    await _recorder.start(
-      const RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        sampleRate: 16000,
-        numChannels: 1,
-      ),
-      path: path,
-    );
-    setState(() => _voiceState = _VoiceState.recording);
-  }
-
-  Future<void> _stopAndSend() async {
-    if (_voiceState != _VoiceState.recording) return;
-    setState(() => _voiceState = _VoiceState.thinking);
-
+    _textController.clear();
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _messages.add(_Msg(isAi: false, text: text));
+      _thinking = true;
+    });
+    _scrollToBottom();
     try {
-      final path = await _recorder.stop();
-      if (path == null || _elderId == null) throw Exception('No recording');
-
-      final aiText = await ApiService.sendVoice(_elderId!, path, _language);
-      File(path).deleteSync();
-
-      setState(() => _aiMessage = aiText);
-      _speak(aiText);
+      final aiText = await ApiService.sendChat(_elderId!, text, _language);
+      if (mounted) {
+        setState(() {
+          _messages.add(_Msg(isAi: true, text: aiText));
+          _thinking = false;
+        });
+        _scrollToBottom();
+        _speak(aiText);
+      }
     } catch (e) {
-      debugPrint('[voice] $e');
-      setState(() => _voiceState = _VoiceState.idle);
-      _alert(_language == 'ja' ? 'エラーが発生しました' : '오류가 발생했어요', '');
+      debugPrint('[chat] $e');
+      if (mounted) setState(() => _thinking = false);
     }
   }
 
-  void _alert(String title, String body) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title, style: const TextStyle(fontSize: 22)),
-        content: body.isNotEmpty
-            ? Text(body, style: const TextStyle(fontSize: 18))
-            : null,
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              _language == 'ja' ? 'OK' : '확인',
-              style: const TextStyle(fontSize: 18, color: Color(0xFF7F77DD)),
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  String _formatDate() {
+    final now = DateTime.now();
+    if (_language == 'ja') {
+      const wd = ['月', '火', '水', '木', '金', '土', '日'];
+      return '${now.month}月${now.day}日（${wd[now.weekday - 1]}）';
+    }
+    const wd = ['월', '화', '수', '목', '금', '토', '일'];
+    return '${now.month}월 ${now.day}일 ${wd[now.weekday - 1]}요일';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isJa = _language == 'ja';
+    final top = MediaQuery.of(context).padding.top;
+    final bottom = MediaQuery.of(context).padding.bottom;
+
+    return Scaffold(
+      backgroundColor: kBg,
+      resizeToAvoidBottomInset: true,
+      body: Column(
+        children: [
+          // ── 헤더 ──────────────────────────────────────────────────
+          Container(
+            width: double.infinity,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [kPrimaryDark, kPrimary],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            padding: EdgeInsets.only(top: top + 14, left: 20, right: 20, bottom: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_formatDate(),
+                    style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.7), fontWeight: FontWeight.w500)),
+                const SizedBox(height: 2),
+                Text(isJa ? '今日もね' : '오늘도요',
+                    style: const TextStyle(fontSize: 22, color: Colors.white, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ),
+
+          // ── 채팅 목록 ──────────────────────────────────────────────
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+              itemCount: _messages.length + (_thinking ? 1 : 0),
+              itemBuilder: (_, i) {
+                if (i == _messages.length) return const _ThinkingBubble();
+                return _ChatBubble(isAi: _messages[i].isAi, text: _messages[i].text);
+              },
+            ),
+          ),
+
+          // ── 입력창 ─────────────────────────────────────────────────
+          Container(
+            color: Colors.white,
+            padding: EdgeInsets.only(left: 14, right: 14, top: 10, bottom: bottom + 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _textController,
+                    enabled: !_thinking,
+                    style: const TextStyle(fontSize: 16, color: kText),
+                    decoration: InputDecoration(
+                      hintText: isJa ? '話しかけてみてください…' : '말을 입력해보세요…',
+                      hintStyle: const TextStyle(color: kTextSub, fontSize: 15),
+                      filled: true,
+                      fillColor: kBg,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    ),
+                    onSubmitted: (_) => _sendText(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _thinking ? null : _sendText,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 46, height: 46,
+                    decoration: BoxDecoration(
+                      color: _thinking ? kPrimary.withValues(alpha: 0.4) : kPrimary,
+                      borderRadius: BorderRadius.circular(23),
+                    ),
+                    child: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 20),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
   }
+}
 
-  String get _buttonLabel {
-    switch (_voiceState) {
-      case _VoiceState.recording:
-        return _language == 'ja' ? '話し中…' : '말하는 중…';
-      case _VoiceState.thinking:
-        return _language == 'ja' ? '考え中…' : '생각 중…';
-      case _VoiceState.speaking:
-        return _language == 'ja' ? '話しています' : '말하는 중';
-      case _VoiceState.idle:
-        return _language == 'ja' ? '話しかける' : '말하기';
-    }
-  }
-
-  Color get _buttonColor {
-    if (_voiceState == _VoiceState.recording) return const Color(0xFFE57373);
-    return const Color(0xFF7F77DD);
-  }
-
-  bool get _isBusy =>
-      _voiceState == _VoiceState.thinking || _voiceState == _VoiceState.speaking;
-
-  String _formatDate() {
-    final now = DateTime.now();
-    if (_language == 'ja') {
-      const wd = ['月', '火', '水', '木', '金', '土', '日'];
-      return '${now.year}年${now.month}月${now.day}日（${wd[now.weekday - 1]}）';
-    }
-    const wd = ['월', '화', '수', '목', '금', '토', '일'];
-    return '${now.year}년 ${now.month}월 ${now.day}일 ${wd[now.weekday - 1]}요일';
-  }
+class _ChatBubble extends StatelessWidget {
+  final bool isAi;
+  final String text;
+  const _ChatBubble({required this.isAi, required this.text});
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 20),
-
-            // 날짜
-            Text(
-              _formatDate(),
-              style: const TextStyle(fontSize: 18, color: Color(0xFF888888)),
-            ),
-            const SizedBox(height: 20),
-
-            // AI 메시지 카드 (큰 글씨 — 시각 보조)
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        mainAxisAlignment: isAi ? MainAxisAlignment.start : MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (isAi) ...[
             Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(28),
+              width: 30, height: 30,
               decoration: BoxDecoration(
-                color: const Color(0xFFEEEDFE),
-                borderRadius: BorderRadius.circular(20),
+                gradient: const LinearGradient(colors: [kPrimaryDark, kPrimary]),
+                borderRadius: BorderRadius.circular(15),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _language == 'ja' ? '今日もね より' : '오늘도요 에서',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      color: Color(0xFF7F77DD),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    _aiMessage.isEmpty
-                        ? (_language == 'ja' ? 'しばらくお待ちください…' : '잠시만 기다려주세요…')
-                        : _aiMessage,
-                    style: const TextStyle(
-                      fontSize: 28,
-                      color: Color(0xFF333333),
-                      height: 1.5,
-                    ),
+              child: const Icon(Icons.smart_toy_outlined, color: Colors.white, size: 15),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: isAi ? Colors.white : kPrimary,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(16),
+                  topRight: const Radius.circular(16),
+                  bottomLeft: isAi ? Radius.zero : const Radius.circular(16),
+                  bottomRight: isAi ? const Radius.circular(16) : Radius.zero,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),
-            ),
-
-            const Spacer(),
-
-            // 마이크 버튼 — 누르고 말하기
-            Center(
-              child: GestureDetector(
-                onTapDown: _isBusy ? null : (_) => _startRecording(),
-                onTapUp: _isBusy ? null : (_) => _stopAndSend(),
-                onTapCancel: _isBusy ? null : () => _stopAndSend(),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  width: 180,
-                  height: 180,
-                  decoration: BoxDecoration(
-                    color: _isBusy ? _buttonColor.withOpacity(0.6) : _buttonColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: _buttonColor.withOpacity(0.4),
-                        blurRadius: 24,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (_voiceState == _VoiceState.thinking)
-                        const SizedBox(
-                          width: 52,
-                          height: 52,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 3,
-                          ),
-                        )
-                      else
-                        Text(
-                          _voiceState == _VoiceState.recording ? '🔴' : '🎙️',
-                          style: const TextStyle(fontSize: 52),
-                        ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _buttonLabel,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isAi ? kText : Colors.white,
+                  height: 1.5,
                 ),
               ),
             ),
+          ),
+          if (!isAi) const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+}
 
-            const SizedBox(height: 24),
-            Center(
-              child: Text(
-                _language == 'ja'
-                    ? 'ボタンを押しながら話してください'
-                    : '버튼을 누르고 말씀하세요',
-                style: const TextStyle(fontSize: 16, color: Color(0xFF888888)),
-              ),
+class _ThinkingBubble extends StatelessWidget {
+  const _ThinkingBubble();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Container(
+            width: 30, height: 30,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [kPrimaryDark, kPrimary]),
+              borderRadius: BorderRadius.circular(15),
             ),
-            const SizedBox(height: 40),
-          ],
-        ),
+            child: const Icon(Icons.smart_toy_outlined, color: Colors.white, size: 15),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+                bottomRight: Radius.circular(16),
+              ),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6, offset: const Offset(0, 2))],
+            ),
+            child: const SizedBox(
+              width: 36, height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: kPrimary),
+            ),
+          ),
+        ],
       ),
     );
   }

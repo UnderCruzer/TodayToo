@@ -6,8 +6,10 @@ import {
   saveConversation,
   logConcern,
   getAllElders,
+  getGuardians,
+  markConcernNotified,
 } from '@oneuldo/db/queries';
-import { sendPushNotification, sendReplyToElder } from './notifications';
+import { sendPushNotification, sendReplyToElder, sendGuardianNotification } from './notifications';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -173,8 +175,35 @@ export async function processElderReply(elderId: string, message: string, imageU
 
 async function executeTool(name: string, input: Record<string, string>, elder: Elder): Promise<string> {
   if (name === 'detect_concern') {
-    await logConcern(elder.id, input.level as 'low' | 'medium' | 'high', input.reason);
-    return JSON.stringify({ ok: true, level: input.level });
+    const level = input.level as 'low' | 'medium' | 'high';
+    const log = await logConcern(elder.id, level, input.reason);
+
+    // medium/high 감지 시 보호자에게 즉시 실시간 알림
+    if (level === 'medium' || level === 'high') {
+      const guardians = await getGuardians(elder.id);
+      const lang = elder.language as 'ja' | 'ko';
+
+      const messages = {
+        ja: {
+          medium: `⚠️ ${elder.name}さんの様子が少し気になります。\n${input.reason}\n近いうちに連絡してみてください。`,
+          high: `🚨 緊急 | ${elder.name}さんから心配な発言がありました。\n${input.reason}\nすぐに確認をお願いします。`,
+        },
+        ko: {
+          medium: `⚠️ ${elder.name}님 상태가 걱정됩니다.\n${input.reason}\n가까운 시일 내 연락해보세요.`,
+          high: `🚨 긴급 | ${elder.name}님에게서 걱정되는 표현이 감지됐어요.\n${input.reason}\n즉시 확인 부탁드립니다.`,
+        },
+      } as const;
+
+      await Promise.allSettled(
+        guardians.map(guardian => {
+          const guardianLang = (guardian.language as 'ja' | 'ko') ?? lang;
+          return sendGuardianNotification(guardian, messages[guardianLang][level]);
+        })
+      );
+      await markConcernNotified(log.id);
+    }
+
+    return JSON.stringify({ ok: true, level });
   }
   if (name === 'save_memory') {
     await saveConversation({

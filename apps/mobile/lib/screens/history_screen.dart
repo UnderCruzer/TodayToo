@@ -23,20 +23,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<void> _load() async {
     final id = await StorageService.getElderId();
     final lang = await StorageService.getLanguage();
+    if (!mounted) return;
     setState(() => _language = lang);
 
     if (id == null) {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
       return;
     }
 
     try {
       final data = await ApiService.getConversations(id);
-      setState(() => _conversations = data);
+      if (mounted) setState(() => _conversations = data);
     } catch (e) {
       debugPrint('[history] $e');
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 

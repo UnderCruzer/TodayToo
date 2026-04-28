@@ -10,11 +10,9 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_tts: ^4.0.2        # AI 음성 TTS
-  record: ^6.0.0             # 음성 녹음 (6.x → record_linux 1.3.0 포함, 인터페이스 호환)
   http: ^1.2.1               # HTTP 통신
   shared_preferences: ^2.2.3 # 로컬 저장 (elderId, language)
-  permission_handler: ^11.3.1
-  path_provider: ^2.1.3
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:
