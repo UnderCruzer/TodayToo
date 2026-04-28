@@ -7,12 +7,7 @@ import {
   logConcern,
   getAllElders,
 } from '@oneuldo/db/queries';
-import {
-  sendPushNotification,
-  sendMessengerNotification,
-  sendReplyToElder,
-  fetchLineContent,
-} from './notifications';
+import { sendPushNotification, sendReplyToElder } from './notifications';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -57,10 +52,7 @@ export async function runDailyCheckin(elder: Elder): Promise<void> {
     ? getWarmGreeting(elder.language as 'ja' | 'ko', elder.name)
     : getRandomGreeting(elder.language as 'ja' | 'ko', elder.name);
 
-  await Promise.allSettled([
-    sendPushNotification(elder.pushToken, greeting),
-    sendMessengerNotification(elder, greeting),
-  ]);
+  await sendPushNotification(elder.pushToken, greeting);
 
   await saveConversation({
     elderId: elder.id,
@@ -74,29 +66,31 @@ export async function runAllDailyCheckins(): Promise<void> {
   await Promise.allSettled(elders.map(runDailyCheckin));
 }
 
-export async function processElderReply(
+function buildSystemInstruction(elder: Elder, recentTopics: string[]): string {
+  const lang = elder.language as 'ja' | 'ko';
+  return lang === 'ja'
+    ? `あなたは${elder.name}さんの毎日の友達AIです。
+温かく、ゆっくり、丁寧に話してください。
+一度に質問は一つだけにしてください。
+最近の会話のテーマ: ${JSON.stringify(recentTopics)}
+返答は3文以内で。`
+    : `당신은 ${elder.name}님의 매일 AI 친구입니다.
+따뜻하고 천천히, 정중하게 대화해주세요.
+한 번에 질문은 하나만 해주세요.
+최근 대화 주제: ${JSON.stringify(recentTopics)}
+답변은 3문장 이내로.`;
+}
+
+// 앱 음성 대화용 — AI 응답 텍스트를 반환 (앱에서 TTS로 읽어줌)
+export async function processElderChat(
   elderId: string,
   message: string,
-  imageUrl?: string,
-  lineReplyToken?: string,
-  lineImageMessageId?: string
-): Promise<void> {
+  imageUrl?: string
+): Promise<string> {
   const elder = await getElderById(elderId);
   const context = await getElderContext(elderId);
 
-  const lang = elder.language as 'ja' | 'ko';
-  const systemInstruction =
-    lang === 'ja'
-      ? `あなたは${elder.name}さんの毎日の友達AIです。
-温かく、ゆっくり、丁寧に話してください。
-一度に質問は一つだけにしてください。
-最近の会話のテーマ: ${JSON.stringify(context.recentTopics)}
-返答は3文以内で。`
-      : `당신은 ${elder.name}님의 매일 AI 친구입니다.
-따뜻하고 천천히, 정중하게 대화해주세요.
-한 번에 질문은 하나만 해주세요.
-최근 대화 주제: ${JSON.stringify(context.recentTopics)}
-답변은 3문장 이내로.`;
+  const systemInstruction = buildSystemInstruction(elder, context.recentTopics);
 
   const detectConcernDecl = {
     name: 'detect_concern',
@@ -125,17 +119,10 @@ export async function processElderReply(
     },
   };
 
-  const tools = [{ functionDeclarations: [detectConcernDecl, saveMemoryDecl] }];
-
-  // 이미지 처리
   type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
   let userParts: Part[];
-  if (lineImageMessageId) {
-    const content = await fetchLineContent(lineImageMessageId);
-    userParts = content
-      ? [{ inlineData: { mimeType: content.mimeType, data: content.data } }, { text: message || '(사진)' }]
-      : [{ text: message || '(사진을 받았어요)' }];
-  } else if (imageUrl) {
+
+  if (imageUrl) {
     const resp = await fetch(imageUrl);
     const buf = await resp.arrayBuffer();
     userParts = [
@@ -146,35 +133,42 @@ export async function processElderReply(
     userParts = [{ text: message }];
   }
 
-  console.log('[AI] Gemini 호출 시작 elderId:', elderId);
-
   const chat = ai.chats.create({
     model: 'gemini-2.5-flash',
-    config: { systemInstruction, maxOutputTokens: 500, tools },
+    config: {
+      systemInstruction,
+      maxOutputTokens: 500,
+      tools: [{ functionDeclarations: [detectConcernDecl, saveMemoryDecl] }],
+    },
   });
 
   let response = await chat.sendMessage({ message: userParts });
-  console.log('[AI] Gemini 응답 수신');
+  let aiText = '';
 
   while (true) {
     const fnCalls = response.functionCalls;
 
     if (!fnCalls || fnCalls.length === 0) {
-      const aiText = response.text ?? '';
-      console.log('[AI] 최종 답변:', aiText.slice(0, 60));
-      await sendReplyToElder(elder, aiText, lineReplyToken);
-      console.log('[AI] 전송 완료');
-      await saveConversation({ elderId, module: 'daily', question: message, answer: aiText });
+      aiText = response.text ?? '';
       break;
     }
 
     const fc = fnCalls[0];
     const toolResult = await executeTool(fc.name!, fc.args as Record<string, string>, elder);
-
     response = await chat.sendMessage({
       message: [{ functionResponse: { name: fc.name!, response: { result: toolResult } } }],
     });
   }
+
+  await saveConversation({ elderId, module: 'daily', question: message, answer: aiText });
+  return aiText;
+}
+
+// 백그라운드 처리용 (cron 등에서 사용)
+export async function processElderReply(elderId: string, message: string, imageUrl?: string): Promise<void> {
+  const elder = await getElderById(elderId);
+  const aiText = await processElderChat(elderId, message, imageUrl);
+  await sendReplyToElder(elder, aiText);
 }
 
 async function executeTool(name: string, input: Record<string, string>, elder: Elder): Promise<string> {

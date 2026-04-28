@@ -1,21 +1,23 @@
 import { supabase } from './index';
 import type {
   Elder, Guardian, Conversation, ConcernLog, Memoir,
-  ElderContext, ResponsePattern, MemoirChapter, Language
+  ElderContext, ResponsePattern, MemoirChapter, Language,
+  GuardianRole, ConversationModule
 } from '@oneuldo/types';
 
 // ─── Mappers (snake_case → camelCase) ────────────────────────────────────────
+
+function toDate(v: unknown): Date { return new Date(v as string); }
+function toDateOpt(v: unknown): Date | undefined { return v ? new Date(v as string) : undefined; }
 
 function mapElder(r: Record<string, unknown>): Elder {
   return {
     id: r.id as string,
     name: r.name as string,
-    language: r.language as string,
+    language: r.language as Language,
     timezone: r.timezone as string,
-    lineUserId: r.line_user_id as string | undefined,
-    kakaoUserId: r.kakao_user_id as string | undefined,
     pushToken: r.push_token as string | undefined,
-    createdAt: r.created_at as string,
+    createdAt: toDate(r.created_at),
   };
 }
 
@@ -24,10 +26,12 @@ function mapGuardian(r: Record<string, unknown>): Guardian {
     id: r.id as string,
     elderId: r.elder_id as string,
     name: r.name as string,
-    role: r.role as string,
+    role: r.role as GuardianRole,
     email: r.email as string,
-    language: r.language as string,
-    createdAt: r.created_at as string,
+    language: r.language as Language,
+    lineUserId: r.line_user_id as string | undefined,
+    kakaoUserId: r.kakao_user_id as string | undefined,
+    createdAt: toDate(r.created_at),
   };
 }
 
@@ -35,13 +39,13 @@ function mapConversation(r: Record<string, unknown>): Conversation {
   return {
     id: r.id as string,
     elderId: r.elder_id as string,
-    module: r.module as string,
+    module: r.module as ConversationModule,
     question: r.question as string,
     answer: r.answer as string | undefined,
     photoUrls: (r.photo_urls ?? []) as string[],
     emotionTags: (r.emotion_tags ?? []) as string[],
     weekNumber: r.week_number as number | undefined,
-    createdAt: r.created_at as string,
+    createdAt: toDate(r.created_at),
   };
 }
 
@@ -52,7 +56,7 @@ function mapConcernLog(r: Record<string, unknown>): ConcernLog {
     level: r.level as 'low' | 'medium' | 'high',
     reason: r.reason as string,
     notified: r.notified as boolean,
-    createdAt: r.created_at as string,
+    createdAt: toDate(r.created_at),
   };
 }
 
@@ -63,8 +67,8 @@ function mapMemoir(r: Record<string, unknown>): Memoir {
     month: r.month as string,
     chapters: r.chapters as MemoirChapter[],
     pdfUrl: r.pdf_url as string | undefined,
-    sentAt: r.sent_at as string | undefined,
-    createdAt: r.created_at as string,
+    sentAt: toDateOpt(r.sent_at),
+    createdAt: toDate(r.created_at),
   };
 }
 
@@ -77,18 +81,6 @@ export async function getElderById(id: string): Promise<Elder> {
   return mapElder(data);
 }
 
-export async function getElderByLineUserId(lineUserId: string): Promise<Elder | null> {
-  const { data } = await supabase
-    .from('elders').select('*').eq('line_user_id', lineUserId).maybeSingle();
-  return data ? mapElder(data) : null;
-}
-
-export async function getElderByKakaoUserId(kakaoUserId: string): Promise<Elder | null> {
-  const { data } = await supabase
-    .from('elders').select('*').eq('kakao_user_id', kakaoUserId).maybeSingle();
-  return data ? mapElder(data) : null;
-}
-
 export async function getAllElders(): Promise<Elder[]> {
   const { data } = await supabase
     .from('elders').select('*').order('created_at', { ascending: false });
@@ -99,8 +91,6 @@ export async function createElder(data: {
   name: string;
   language: Language;
   timezone?: string;
-  lineUserId?: string;
-  kakaoUserId?: string;
   pushToken?: string;
 }): Promise<Elder> {
   const { data: row, error } = await supabase
@@ -109,8 +99,6 @@ export async function createElder(data: {
       name: data.name,
       language: data.language,
       timezone: data.timezone ?? (data.language === 'ja' ? 'Asia/Tokyo' : 'Asia/Seoul'),
-      line_user_id: data.lineUserId ?? null,
-      kakao_user_id: data.kakaoUserId ?? null,
       push_token: data.pushToken ?? null,
     })
     .select('*').single();
@@ -136,18 +124,24 @@ export async function createGuardian(data: {
   role: string;
   email: string;
   language: Language;
+  lineUserId?: string;
+  kakaoUserId?: string;
 }): Promise<Guardian> {
+  const payload: Record<string, unknown> = {
+    elder_id: data.elderId,
+    name: data.name,
+    role: data.role,
+    email: data.email,
+    language: data.language,
+  };
+  if (data.lineUserId !== undefined) payload.line_user_id = data.lineUserId;
+  if (data.kakaoUserId !== undefined) payload.kakao_user_id = data.kakaoUserId;
+
   const { data: row, error } = await supabase
     .from('guardians')
-    .insert({
-      elder_id: data.elderId,
-      name: data.name,
-      role: data.role,
-      email: data.email,
-      language: data.language,
-    })
+    .insert(payload)
     .select('*').single();
-  if (error || !row) throw new Error('Failed to create guardian');
+  if (error || !row) throw new Error(`Failed to create guardian: ${error?.message}`);
   return mapGuardian(row);
 }
 

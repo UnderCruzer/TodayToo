@@ -8,8 +8,6 @@ export interface Elder {
   name: string;
   language: Language;
   timezone: string;
-  lineUserId?: string;
-  kakaoUserId?: string;
   pushToken?: string;
   createdAt: Date;
 }
@@ -21,6 +19,8 @@ export interface Guardian {
   role: GuardianRole;
   email: string;
   language: Language;
+  lineUserId?: string;
+  kakaoUserId?: string;
   createdAt: Date;
 }
 

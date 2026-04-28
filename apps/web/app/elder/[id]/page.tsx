@@ -6,6 +6,7 @@ import {
   getRecentConcernLogs,
   getMemoirsByElder,
 } from '@oneuldo/db/queries';
+import InviteSection from './InviteSection';
 
 export const dynamic = 'force-dynamic';
 
@@ -121,6 +122,9 @@ export default async function ElderDetail({ params }: Props) {
               </div>
             )}
           </div>
+
+          {/* 보호자 초대 */}
+          <InviteSection elderId={elder.id} isJa={isJa} />
 
           {/* 회고록 목록 */}
           <div>

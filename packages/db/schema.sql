@@ -4,27 +4,27 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "vector";
 
--- 어르신 프로필
+-- 어르신 프로필 (앱 전용, LINE/카카오 직접 연동 없음)
 CREATE TABLE IF NOT EXISTS elders (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name            VARCHAR NOT NULL,
   language        VARCHAR NOT NULL DEFAULT 'ja',  -- 'ja' | 'ko'
   timezone        VARCHAR NOT NULL DEFAULT 'Asia/Tokyo',
-  line_user_id    VARCHAR UNIQUE,   -- 일본 LINE 연동
-  kakao_user_id   VARCHAR UNIQUE,   -- 한국 카카오 연동
   push_token      VARCHAR,          -- Expo 앱 푸시 토큰
   created_at      TIMESTAMP DEFAULT NOW()
 );
 
--- 가족·기관 계정
+-- 가족·기관 계정 (LINE/카카오로 단방향 알림 수신)
 CREATE TABLE IF NOT EXISTS guardians (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  elder_id    UUID REFERENCES elders(id) ON DELETE CASCADE,
-  name        VARCHAR NOT NULL,
-  role        VARCHAR NOT NULL DEFAULT 'family',  -- 'family' | 'welfare' | 'facility'
-  email       VARCHAR UNIQUE NOT NULL,
-  language    VARCHAR NOT NULL DEFAULT 'ja',
-  created_at  TIMESTAMP DEFAULT NOW()
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  elder_id        UUID REFERENCES elders(id) ON DELETE CASCADE,
+  name            VARCHAR NOT NULL,
+  role            VARCHAR NOT NULL DEFAULT 'family',  -- 'family' | 'welfare' | 'facility'
+  email           VARCHAR UNIQUE NOT NULL,
+  language        VARCHAR NOT NULL DEFAULT 'ja',
+  line_user_id    VARCHAR UNIQUE,   -- 일본 LINE 알림 수신용
+  kakao_user_id   VARCHAR UNIQUE,   -- 한국 카카오 알림 수신용
+  created_at      TIMESTAMP DEFAULT NOW()
 );
 
 -- 대화 기록 (모듈 A daily + 모듈 C memoir 공유)

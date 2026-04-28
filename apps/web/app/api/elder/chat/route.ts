@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { processElderReply } from '@oneuldo/ai';
+import { processElderChat } from '@oneuldo/ai';
 
-// POST /api/elder/reply — 어르신 앱에서 답장 수신
+// POST /api/elder/chat — 앱 음성 대화: STT 변환된 텍스트를 받아 AI 응답 텍스트 반환
+// 앱이 응답 텍스트를 expo-speech로 TTS 재생함
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as {
@@ -15,14 +16,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'elderId and message required' }, { status: 400 });
     }
 
-    // 비동기로 처리 (앱에 즉시 200 반환)
-    processElderReply(elderId, message, imageUrl).catch(err =>
-      console.error('[reply] processElderReply failed:', err)
-    );
-
-    return NextResponse.json({ ok: true });
+    const aiText = await processElderChat(elderId, message, imageUrl);
+    return NextResponse.json({ text: aiText });
   } catch (err) {
-    console.error('[reply]', err);
+    console.error('[chat]', err);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

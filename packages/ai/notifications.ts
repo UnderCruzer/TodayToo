@@ -1,37 +1,37 @@
 import type { Elder, Guardian } from '@oneuldo/types';
 
-// ─── Push Notification (Expo) ─────────────────────────────────────────────────
+// ─── 어르신 앱 Push (Flutter) ─────────────────────────────────────────────────
 
 export async function sendPushNotification(
   pushToken: string | undefined,
   message: string
 ): Promise<void> {
   if (!pushToken) return;
-
-  const expoEndpoint = 'https://exp.host/--/api/v2/push/send';
-  const body = JSON.stringify({
-    to: pushToken,
-    title: '今日もね / 오늘도요',
-    body: message,
-    sound: 'default',
-  });
-
-  await fetch(expoEndpoint, {
+  await fetch('https://exp.host/--/api/v2/push/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body,
+    body: JSON.stringify({
+      to: pushToken,
+      title: '今日もね / 오늘도요',
+      body: message,
+      sound: 'default',
+    }),
   }).catch(err => console.error('[Push] Failed:', err));
 }
 
-// ─── LINE Bot API (일본) ──────────────────────────────────────────────────────
+export async function sendReplyToElder(elder: Elder, message: string): Promise<void> {
+  await sendPushNotification(elder.pushToken, message);
+}
 
-export async function sendLineMessage(
+// ─── 보호자(가족) 단방향 알림 ─────────────────────────────────────────────────
+// 이상감지·회고록 알림은 보호자의 LINE/이메일로 전송
+
+export async function sendGuardianLineMessage(
   lineUserId: string,
   message: string
 ): Promise<void> {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (!token) return;
-
   await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: {
@@ -42,144 +42,70 @@ export async function sendLineMessage(
       to: lineUserId,
       messages: [{ type: 'text', text: message }],
     }),
-  }).catch(err => console.error('[LINE push] Failed:', err));
+  }).catch(err => console.error('[LINE guardian push] Failed:', err));
 }
 
-// replyToken 기반 즉시 답장 (push quota 소비 없음)
-export async function sendLineReply(
-  replyToken: string,
-  message: string
+// 카카오 알림톡: 비즈니스 계정 + 템플릿 승인 필요 (KAKAO_SENDER_KEY 설정 후 활성화)
+export async function sendGuardianKakaoMessage(
+  _kakaoUserId: string,
+  _message: string
 ): Promise<void> {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!token) return;
-
-  await fetch('https://api.line.me/v2/bot/message/reply', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      replyToken,
-      messages: [{ type: 'text', text: message }],
-    }),
-  }).catch(err => console.error('[LINE reply] Failed:', err));
-}
-
-// LINE Content API — 이미지/파일 다운로드
-export async function fetchLineContent(messageId: string): Promise<{ data: string; mimeType: string } | null> {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!token) return null;
-
-  const res = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
-    headers: { Authorization: `Bearer ${token}` },
-  }).catch(err => { console.error('[LINE content] Failed:', err); return null; });
-
-  if (!res || !res.ok) return null;
-
-  const buf = await res.arrayBuffer();
-  const mimeType = res.headers.get('content-type') ?? 'image/jpeg';
-  return { data: Buffer.from(buf).toString('base64'), mimeType };
-}
-
-// ─── 카카오 알림톡 (한국) ────────────────────────────────────────────────────
-
-export async function sendKakaoMessage(
-  kakaoUserId: string,
-  message: string
-): Promise<void> {
-  const token = process.env.KAKAO_ACCESS_TOKEN;
-  if (!token) return;
-
-  // 카카오 알림톡 API (실제 구현 시 비즈 계정 + 템플릿 승인 필요)
-  await fetch('https://kapi.kakao.com/v2/api/talk/memo/default/send', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Authorization: `Bearer ${token}`,
-    },
-    body: new URLSearchParams({
-      template_object: JSON.stringify({
-        object_type: 'text',
-        text: message,
-        link: { web_url: process.env.BASE_URL ?? '' },
-      }),
-    }),
-  }).catch(err => console.error('[Kakao] Failed:', err));
-}
-
-// ─── 어르신에게 통합 발송 ──────────────────────────────────────────────────────
-
-export async function sendReplyToElder(
-  elder: Elder,
-  message: string,
-  lineReplyToken?: string
-): Promise<void> {
-  const tasks: Promise<void>[] = [];
-
-  if (elder.pushToken) {
-    tasks.push(sendPushNotification(elder.pushToken, message));
+  const senderKey = process.env.KAKAO_SENDER_KEY;
+  if (!senderKey) {
+    console.warn('[Kakao] KAKAO_SENDER_KEY not set — skipping');
+    return;
   }
-  if (lineReplyToken) {
-    tasks.push(sendLineReply(lineReplyToken, message));
-  } else if (elder.lineUserId) {
-    tasks.push(sendLineMessage(elder.lineUserId, message));
-  }
-  if (elder.kakaoUserId) {
-    tasks.push(sendKakaoMessage(elder.kakaoUserId, message));
-  }
-
-  await Promise.allSettled(tasks);
+  // TODO: 알림톡 템플릿 승인 후 구현
+  // POST https://api-alimtalk.kakao.com/alimtalk/v2/sender/{senderKey}/message
+  console.warn('[Kakao] 알림톡 not yet implemented — set KAKAO_SENDER_KEY and template');
 }
 
-// ─── 보호자(가족·기관)에게 알림 ──────────────────────────────────────────────
+// ─── 이메일 알림 (Resend) ─────────────────────────────────────────────────────
 
-export async function sendGuardianNotification(
-  guardian: Guardian,
-  message: string
+export async function sendGuardianEmail(
+  email: string,
+  subject: string,
+  text: string
 ): Promise<void> {
-  // 이메일 알림 (SendGrid / Resend)
-  const apiKey = process.env.SENDGRID_API_KEY ?? process.env.RESEND_API_KEY;
+  const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return;
 
-  const isResend = !!process.env.RESEND_API_KEY;
-  const endpoint = isResend
-    ? 'https://api.resend.com/emails'
-    : 'https://api.sendgrid.com/v3/mail/send';
-
-  const payload = isResend
-    ? JSON.stringify({
-        from: 'noreply@oneuldo.app',
-        to: [guardian.email],
-        subject: '今日もね / 오늘도요 알림',
-        text: message,
-      })
-    : JSON.stringify({
-        personalizations: [{ to: [{ email: guardian.email }] }],
-        from: { email: 'noreply@oneuldo.app' },
-        subject: '今日もね / 오늘도요 알림',
-        content: [{ type: 'text/plain', value: message }],
-      });
-
-  await fetch(endpoint, {
+  await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: payload,
-  }).catch(err => console.error('[Email] Failed:', err));
+    body: JSON.stringify({
+      from: 'TodayToo <noreply@resend.dev>',
+      to: [email],
+      subject,
+      text,
+    }),
+  }).catch(err => console.error('[Resend email] Failed:', err));
 }
 
-export async function sendMessengerNotification(
-  elder: Elder,
+// ─── 통합 보호자 알림 ─────────────────────────────────────────────────────────
+
+export async function sendGuardianNotification(
+  guardian: Guardian,
   message: string,
-  lineReplyToken?: string
+  subject?: string
 ): Promise<void> {
-  if (lineReplyToken) {
-    await sendLineReply(lineReplyToken, message);
-  } else if (elder.lineUserId) {
-    await sendLineMessage(elder.lineUserId, message);
+  const tasks: Promise<void>[] = [];
+
+  if (guardian.lineUserId) {
+    tasks.push(sendGuardianLineMessage(guardian.lineUserId, message));
   }
-  if (elder.kakaoUserId) await sendKakaoMessage(elder.kakaoUserId, message);
+  if (guardian.kakaoUserId) {
+    tasks.push(sendGuardianKakaoMessage(guardian.kakaoUserId, message));
+  }
+
+  // 이메일은 LINE/카카오가 없을 때 fallback (있으면 함께 발송)
+  if (guardian.email && !guardian.email.endsWith('@placeholder.local')) {
+    const emailSubject = subject ?? '오늘도요 알림 / 今日もね通知';
+    tasks.push(sendGuardianEmail(guardian.email, emailSubject, message));
+  }
+
+  await Promise.allSettled(tasks);
 }

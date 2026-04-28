@@ -6,22 +6,24 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "db:migrate": "node packages/db/migrate.js",
-    "tunnel": "node scripts/tunnel.js"
+    "db:migrate": "node packages/db/migrate.js"
   },
   "devDependencies": {
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "turbo": "^2.0.0",
     "typescript": "^5.4.0"
   },
   "workspaces": [
-    "apps/*",
+    "apps/web",
     "packages/*"
   ],
+  "overrides": {
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
   "packageManager": "npm@11.12.1",
   "engines": {
     "node": ">=20"
-  },
-  "dependencies": {
-    "expo-dev-client": "~6.0.20"
   }
 }

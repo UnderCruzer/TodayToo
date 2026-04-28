@@ -28,9 +28,11 @@ export async function PUT(req: NextRequest) {
       email: string;
       role?: string;
       language?: string;
+      lineUserId?: string;
+      kakaoUserId?: string;
     };
 
-    const { token, name, email, role = 'family', language = 'ja' } = body;
+    const { token, name, email, role = 'family', language = 'ja', lineUserId, kakaoUserId } = body;
     if (!token || !name || !email) {
       return NextResponse.json(
         { error: 'token, name, email required' },
@@ -49,6 +51,8 @@ export async function PUT(req: NextRequest) {
       email,
       role,
       language: language as 'ja' | 'ko',
+      lineUserId,
+      kakaoUserId,
     });
 
     return NextResponse.json({ guardian });

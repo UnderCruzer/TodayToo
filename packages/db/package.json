@@ -7,7 +7,9 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.0"
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^17.4.2",
+    "pg": "^8.20.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
